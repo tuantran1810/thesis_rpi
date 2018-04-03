@@ -22,7 +22,7 @@ BAP_RECORDING_TIME = 10    # Time for a recording sequence
 
 BAP_MIN_EXPECTED_BALL_SIZE = 200    # Place camera about 50cm higher than the plate
 BAP_MAX_EXPECTED_BALL_SIZE = 500
-BAP_BALL_CENTER_OFFSET = 20
+BAP_BALL_CENTER_OFFSET = 10
 
 BAP_CAMERA_WARMUP_TIME = 2
 BAP_CAMERA_MODE = 7
@@ -209,7 +209,7 @@ class BAP_PlateDetecting_Thread(threading.Thread):
             # count += 1
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# Find Ball position and send it through UART
+# Find Ball position and pass it through Kalman filter
 class BAP_BallPos_Thread(threading.Thread):
     global BAP_MIN_EXPECTED_BALL_SIZE, BAP_MAX_EXPECTED_BALL_SIZE, BAP_IMAGE_SIZE, BAP_BALL_CENTER_OFFSET
     def __init__(self):
@@ -227,6 +227,18 @@ class BAP_BallPos_Thread(threading.Thread):
         global BAP_BallPos_Mutex
         global BAP_BallPos_Sem
 
+        kalman = cv2.KalmanFilter(4, 2, 0)
+        kalman.measurementMatrix = np.array([[1,0,0,0],[0,1,0,0]],np.float32)
+        kalman.transitionMatrix = np.array([[1,0,0.02,0],[0,1,0,0.02],[0,0,1,0],[0,0,0,1]],np.float32)
+        kalman.processNoiseCov = np.array([[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],np.float32) * 10
+        kalman.measurementNoiseCov = np.array([[1,0],[0,1]],np.float32) * 0.00003
+
+        BallX = 0
+        BallY = 0
+
+        RealBallX = 0
+        RealBallY = 0
+
         while True:
             BAP_PlateImage_Sem.acquire()
 
@@ -239,8 +251,7 @@ class BAP_BallPos_Thread(threading.Thread):
             if(len(contours) != 0):
                 # find expected ball area
                 num = 0
-                BallX = 0
-                BallY = 0
+
                 for cnt in contours:
                     area = cv2.contourArea(cnt)
                     if(area > BAP_MIN_EXPECTED_BALL_SIZE and area < BAP_MAX_EXPECTED_BALL_SIZE):
@@ -259,24 +270,31 @@ class BAP_BallPos_Thread(threading.Thread):
                             break
 
                 if(num == 1):
-                    BAP_BallPos_Mutex.acquire()
-                    BAP_BallPos_X = BallX
-                    BAP_BallPos_Y = BallY
-                    BAP_BallPos_Mutex.release()
-                    BAP_BallPos_Sem.release()
-                    BAP_PlateImage_Mutex.acquire()
-                    cv2.circle(BAP_PlateImage, (cX, cY), 7, (255, 255, 255), -1)
-                    BAP_PlateImage_Mutex.release()
+                    RealBallX = BallX
+                    RealBallY = BallY
                 elif (num == 0):
                     print "No ball found"
                 else:
                     print "There are more than 1 object like ball on the plate"
+            else:
+                print "Nothing found on plate"
 
+            kalman.correct(np.array([[np.float32(RealBallX)],[np.float32(RealBallY)]]))
+            tmp = kalman.predict()
+            BAP_BallPos_Mutex.acquire()
+            BAP_BallPos_X = tmp[0]
+            BAP_BallPos_Y = tmp[1]
+            BAP_BallPos_Mutex.release()
+            BAP_BallPos_Sem.release()
+            BAP_PlateImage_Mutex.acquire()
+            cv2.circle(BAP_PlateImage, (tmp[0], tmp[1]), 7, (255, 255, 255), -1)
+            BAP_PlateImage_Mutex.release()
+            
             # count += 1
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # UART sending thread, this thread is used to send ball position to MCU through UART
-class BAP_UARTSending_Thread(threading.Thread):BAP_UARTSending_Thread
+class BAP_UARTSending_Thread(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
 
@@ -291,9 +309,6 @@ class BAP_UARTSending_Thread(threading.Thread):BAP_UARTSending_Thread
             BallX = BAP_BallPos_X
             BallY = BAP_BallPos_Y
             BAP_BallPos_Mutex.release()
-
-            
-
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # Display thread (just use 1 thread to display)
@@ -330,14 +345,14 @@ class BAP_ImageDisplay_Thread(threading.Thread):
 
 BAP_ImageGet_Thread = BAP_ImageGet_Thread()
 BAP_PlateDetecting_Thread = BAP_PlateDetecting_Thread()
-BAP_BallPos_UARTSending_Thread = BAP_BallPos_Thread()
+BAP_BallPos_Thread = BAP_BallPos_Thread()
 BAP_OriginalImageDisplay_Thread = BAP_ImageDisplay_Thread("Original", 0)
 BAP_BlurImageDisplay_Thread = BAP_ImageDisplay_Thread("Blur", 1)
 BAP_PlateImageDisplay_Thread = BAP_ImageDisplay_Thread("Plate", 2)
 
 BAP_ImageGet_Thread.start()
 BAP_PlateDetecting_Thread.start()
-BAP_BallPos_UARTSending_Thread.start()
+BAP_BallPos_Thread.start()
 # BAP_OriginalImageDisplay_Thread.start()
 # BAP_BlurImageDisplay_Thread.start()
 BAP_PlateImageDisplay_Thread.start()
