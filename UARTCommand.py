@@ -1,21 +1,26 @@
 #!/usr/bin/python
-
 import Queue
 import threading
 import serial
 import time
 
-
 # START_OF_TEXT_D = '\x02'
 # END_OF_TEXT_D = '\x03'
 START_OF_TEXT_D = '2'
 END_OF_TEXT_D = '3'
-QUEUE_SIZE = 100
-QUEUE_MESS_SIZE = 1000
 SERIAL_DEVICE = '/dev/ttyAMA0'
-SERIAL_SPEED = 115200
+SERIAL_SPEED = 460800
 
 usleep = lambda x: time.sleep(x/1000000.0)
+
+ser = serial.Serial(
+    port = SERIAL_DEVICE,
+    baudrate = SERIAL_SPEED,
+    parity = serial.PARITY_NONE,
+    stopbits = serial.STOPBITS_ONE,
+    bytesize = serial.EIGHTBITS,
+    timeout = None
+)
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # Buffer for receiving UART command
@@ -91,82 +96,35 @@ class CommandBuffer:
         self.ResetBuffer()
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# Command processing thread
-class StringProcThread (threading.Thread):
-
-   def __init__(self, MsgQueue, Lock, Sem):
-      threading.Thread.__init__(self)
-      self.MsgQueue = MsgQueue
-      self.Lock = Lock
-      self.Sem = Sem
-
-   def run(self):
-      while 1:
-        self.Sem.acquire()
-        self.Lock.acquire()
-        if not self.MsgQueue.empty():
-            data = self.MsgQueue.get()
-            print 'Receive: ' + repr(data)
-        self.Lock.release()
-
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # UART receiving thread
 class RecvThread (threading.Thread):
 
-   def __init__(self, CmdBuffer):
+    def __init__(self, CmdBuffer):
       threading.Thread.__init__(self)
       self.CmdBuffer = CmdBuffer
 
-   def run(self):
+    def run(self):
       while 1:
         inData = ser.read()
         self.CmdBuffer.WriteBuffer(inData)
+        usleep(5)
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # Command processing thread
 class SendThread (threading.Thread):
 
-   def __init__(self, MsgQueue, Lock, Sem):
+    def __init__(self, MsgQueue, Lock, Sem):
       threading.Thread.__init__(self)
       self.MsgQueue = MsgQueue
       self.Lock = Lock
       self.Sem = Sem
 
-   def run(self):
+    def run(self):
       while 1:
         self.Sem.acquire()
         self.Lock.acquire()
         if not self.MsgQueue.empty():
             data = self.MsgQueue.get()
             ser.write(data)
+            print "Send: ", data
         self.Lock.release()
-
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-RecvMsgQueue = Queue.Queue(QUEUE_SIZE)
-RecvMsgQueueMutex = threading.Lock()
-RecvMsgQueueSem = threading.Semaphore(QUEUE_SIZE)
-CmdBuffer = CommandBuffer(QUEUE_MESS_SIZE, RecvMsgQueue, RecvMsgQueueMutex, RecvMsgQueueSem)
-
-SendMsgQueue = Queue.Queue(QUEUE_SIZE)
-SendMsgQueueMutex = threading.Lock()
-SendMsgQueueSem = threading.Semaphore(QUEUE_SIZE)
-
-ser = serial.Serial(
-    port = SERIAL_DEVICE,
-    baudrate = SERIAL_SPEED,
-    parity = serial.PARITY_NONE,
-    stopbits = serial.STOPBITS_ONE,
-    bytesize = serial.EIGHTBITS,
-    timeout = None
-)
-
-# Create new threads
-RecvThread = RecvThread(CmdBuffer)
-StringProcThread = StringProcThread(RecvMsgQueue, RecvMsgQueueMutex, RecvMsgQueueSem)
-SendThread = SendThread(SendMsgQueue, SendMsgQueueMutex, SendMsgQueueSem)
-
-# Start new Threads
-RecvThread.start()
-StringProcThread.start()
-SendThread.start()
