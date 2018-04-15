@@ -9,7 +9,7 @@ import time
 START_OF_TEXT_D = '2'
 END_OF_TEXT_D = '3'
 SERIAL_DEVICE = '/dev/ttyAMA0'
-SERIAL_SPEED = 460800
+SERIAL_SPEED = 230400
 
 usleep = lambda x: time.sleep(x/1000000.0)
 

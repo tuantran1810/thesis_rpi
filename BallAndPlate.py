@@ -294,8 +294,8 @@ class BAP_BallPos_Thread(threading.Thread):
 
             test1 = 70
             UARTStr = '[BPos][' + '%03d '%test0 + '%03d]'%test1
-            length = len(UARTStr) + 14
-            lenStr = 'UUUUUUUUUU[' + '%02d'%length + ']'
+            length = len(UARTStr) + 4
+            lenStr = '[' + '%02d'%length + ']'
             SendStr = lenStr + UARTStr
 
             test0 += 1
@@ -303,7 +303,7 @@ class BAP_BallPos_Thread(threading.Thread):
                 test0 = 0
 
             self.SendLock.acquire()
-            self.SendMsgQueue.put(SendStr.ljust(40, '\x55'))
+            self.SendMsgQueue.put(SendStr.ljust(40, ' '))
             self.SendLock.release()
             self.SendSem.release()
             # usleep(20000)
