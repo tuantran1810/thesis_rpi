@@ -20,12 +20,16 @@ usleep = lambda x: time.sleep(x/1000000.0)
 BAP_IMAGE_SIZE = 320 # Square image
 BAP_IMAGE_SIZE_STR = '320x320'
 
-BAP_THREADHOLD_VALUE = 50   # Value to put in threshold function, assign 255 to pixels that have lower value than this and 0 to the higher
+BAP_THREADHOLD_VALUE = 190   # Value to put in threshold function, assign 255 to pixels that have lower value than this and 0 to the higher
+BAP_BALL_THREADHOLD_VALUE = 230   # Value to put in threshold function, assign 255 to pixels that have lower value than this and 0 to the higher
 BAP_RECORDING_TIME = 10    # Time for a recording sequence
 
-BAP_MIN_EXPECTED_BALL_SIZE = 200    # Place camera about 50cm higher than the plate
-BAP_MAX_EXPECTED_BALL_SIZE = 500
+BAP_MIN_EXPECTED_BALL_SIZE = 0    # Place camera about 50cm higher than the plate
+BAP_MAX_EXPECTED_BALL_SIZE = 400
 BAP_BALL_CENTER_OFFSET = 10
+
+BAP_MIN_EXPECTED_PLATE_SIZE = 50000
+BAP_MAX_EXPECTED_PLATE_SIZE = 65000
 
 BAP_CAMERA_WARMUP_TIME = 2
 BAP_CAMERA_MODE = 7
@@ -44,6 +48,9 @@ BAP_BlurImage_Mutex = threading.Lock()
 BAP_PlateImage = np.zeros((BAP_IMAGE_SIZE,BAP_IMAGE_SIZE))
 BAP_NewPlate_Flag = 0
 BAP_PlateImage_Mutex = threading.Lock()
+
+BAP_PlateImageBinary = np.zeros((BAP_IMAGE_SIZE,BAP_IMAGE_SIZE))
+BAP_PlateImageBinary_Mutex = threading.Lock()
 
 BAP_WarpPerspectiveMatrix = np.zeros((3,3))
 BAP_WarpPerspectiveMatrix_Mutex = threading.Lock()
@@ -96,22 +103,29 @@ class BAP_ImageGet_Handler(object):
 
         _, contours, hierarchy = cv2.findContours(blurimg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
+        area = []
         if(len(contours) != 0):
             #find biggest area
             BiggestArea = 0
             BiggestAreaPos = 0
             pos = 0
             for cnt in contours:
-                area = cv2.contourArea(cnt)
-                if (area > BiggestArea):
-                    BiggestArea = area
+                area.append(cv2.contourArea(cnt))
+                if (area[pos] > BiggestArea):
+                    BiggestArea = area[pos]
                     BiggestAreaPos = pos
                 pos += 1
 
-            BiggestContour = contours[BiggestAreaPos]
+            pos = 0
+            PlateContour = contours[BiggestAreaPos]
+            for plate_area in area:
+                if (plate_area < BAP_MAX_EXPECTED_PLATE_SIZE and plate_area > BAP_MIN_EXPECTED_PLATE_SIZE):
+                    PlateContour = contours[pos]
+                pos += 1
 
-            epsilon = 0.1*cv2.arcLength(BiggestContour,True)
-            approx = cv2.approxPolyDP(BiggestContour,epsilon,True)
+            
+            epsilon = 0.1*cv2.arcLength(PlateContour,True)
+            approx = cv2.approxPolyDP(PlateContour,epsilon,True)
 
             rect_points = np.zeros((4,2), dtype = "float32")
             xplusy = np.zeros((4,1), dtype = "float32")
@@ -186,7 +200,7 @@ class BAP_PlateDetecting_Thread(threading.Thread):
     def run(self):
         global count
 
-        global BAP_BlurImage
+        global BAP_OriginalImage
         global BAP_BlurImage_Mutex
 
         global BAP_PlateImage
@@ -207,7 +221,7 @@ class BAP_PlateDetecting_Thread(threading.Thread):
 
             if M is not None:
                 BAP_BlurImage_Mutex.acquire()
-                src = BAP_BlurImage.copy()
+                src = BAP_OriginalImage.copy()
                 BAP_BlurImage_Mutex.release()
 
                 src = cv2.warpPerspective(src,M,(BAP_IMAGE_SIZE,BAP_IMAGE_SIZE))
@@ -233,6 +247,8 @@ class BAP_BallPos_Thread(threading.Thread):
 
         global BAP_PlateImage
         global BAP_PlateImage_Mutex
+        global BAP_PlateImageBinary
+        global BAP_PlateImageBinary_Mutex
         global BAP_NewPlate_Flag
 
         kalman = cv2.KalmanFilter(4, 2, 0)
@@ -251,11 +267,17 @@ class BAP_BallPos_Thread(threading.Thread):
 
         while True:
             BAP_PlateImage_Mutex.acquire()
-            img = BAP_PlateImage.copy()
+            plate_img = BAP_PlateImage.copy()
             new_flag = BAP_NewPlate_Flag
             BAP_PlateImage_Mutex.release()
 
             if new_flag:
+                _,img = cv2.threshold(plate_img, BAP_BALL_THREADHOLD_VALUE, 255, cv2.THRESH_BINARY_INV)
+                img = cv2.blur(img,(3,3))
+                BAP_PlateImageBinary_Mutex.acquire()
+                BAP_PlateImageBinary = img.copy()
+                BAP_PlateImageBinary_Mutex.release()
+
                 _, contours, hierarchy = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
                 if(len(contours) != 0):
@@ -293,7 +315,7 @@ class BAP_BallPos_Thread(threading.Thread):
             tmp = kalman.predict()
 
             test1 = 70
-            UARTStr = '[BPos][' + '%03d '%test0 + '%03d]'%test1
+            UARTStr = '[BPos][' + '%03d '%tmp[0] + '%03d]'%tmp[1]
             length = len(UARTStr) + 4
             lenStr = '[' + '%02d'%length + ']'
             SendStr = lenStr + UARTStr
@@ -303,7 +325,7 @@ class BAP_BallPos_Thread(threading.Thread):
                 test0 = 0
 
             self.SendLock.acquire()
-            self.SendMsgQueue.put(SendStr.ljust(40, ' '))
+            # self.SendMsgQueue.put(SendStr.ljust(40, ' '))
             self.SendLock.release()
             self.SendSem.release()
             # usleep(20000)
@@ -334,6 +356,9 @@ class BAP_ImageDisplay_Thread(threading.Thread):
             elif(self.imagenum == 2):
                 image = BAP_PlateImage
                 self.mutex = BAP_PlateImage_Mutex
+            elif(self.imagenum == 3):
+                image = BAP_PlateImageBinary
+                self.mutex = BAP_PlateImageBinary_Mutex
             else:
                 image = None
                 self.mutex = None
@@ -356,6 +381,7 @@ BAP_BallPos_Thread = BAP_BallPos_Thread(BAP_SendMsgQueue, BAP_SendMsgQueueMutex,
 BAP_OriginalImageDisplay_Thread = BAP_ImageDisplay_Thread("Original", 0)
 BAP_BlurImageDisplay_Thread = BAP_ImageDisplay_Thread("Blur", 1)
 BAP_PlateImageDisplay_Thread = BAP_ImageDisplay_Thread("Plate", 2)
+BAP_PlateBinImageDisplay_Thread = BAP_ImageDisplay_Thread("PlateBin", 3)
 
 BAP_RecvThread.start()
 BAP_SendThread.start()
@@ -366,3 +392,4 @@ BAP_BallPos_Thread.start()
 # BAP_OriginalImageDisplay_Thread.start()
 # BAP_BlurImageDisplay_Thread.start()
 # BAP_PlateImageDisplay_Thread.start()
+BAP_PlateBinImageDisplay_Thread.start()
