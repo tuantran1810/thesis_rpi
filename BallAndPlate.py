@@ -37,7 +37,6 @@ BAP_CAMERA_FRAMERATE = 90
 BAP_CAMERA_COLOR_MODE = 'yuv'
 
 BAP_QUEUE_SIZE = 10
-BAP_QUEUE_MESS_SIZE = 50
 
 BAP_OriginalImage = np.zeros((BAP_IMAGE_SIZE,BAP_IMAGE_SIZE))
 BAP_OriginalImage_Mutex = threading.Lock()
@@ -57,15 +56,9 @@ BAP_WarpPerspectiveMatrix_Mutex = threading.Lock()
 BAP_WarpPerspectiveMatrix_Sem = threading.Semaphore(1)
 BAP_WarpPerspectiveMatrix_Sem.acquire()
 
-BAP_RecvMsgQueue = Queue.Queue(BAP_QUEUE_SIZE)
-BAP_RecvMsgQueueMutex = threading.Lock()
-BAP_RecvMsgQueueSem = threading.Semaphore(1)
-
 BAP_SendMsgQueue = Queue.Queue(BAP_QUEUE_SIZE)
 BAP_SendMsgQueueMutex = threading.Lock()
 BAP_SendMsgQueueSem = threading.Semaphore(1)
-
-BAP_CmdBuffer = UARTCommand.CommandBuffer(BAP_QUEUE_MESS_SIZE, BAP_RecvMsgQueue, BAP_RecvMsgQueueMutex, BAP_RecvMsgQueueSem)
 
 count = 0
 
@@ -325,12 +318,6 @@ class BAP_BallPos_Thread(threading.Thread):
                 self.SendLock.release()
                 self.SendSem.release()
 
-            # BAP_PlateImage_Mutex.acquire()
-            # cv2.circle(BAP_PlateImage, (tmp[0], tmp[1]), 7, (255, 255, 255), -1)
-            # BAP_PlateImage_Mutex.release()
-            
-            # count += 1
-
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # Display thread (just use 1 thread to display)
 class BAP_ImageDisplay_Thread(threading.Thread):
@@ -367,7 +354,6 @@ class BAP_ImageDisplay_Thread(threading.Thread):
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # Main code
 
-BAP_RecvThread = UARTCommand.RecvThread(BAP_CmdBuffer)
 BAP_SendThread = UARTCommand.SendThread(BAP_SendMsgQueue, BAP_SendMsgQueueMutex, BAP_SendMsgQueueSem)
 
 BAP_ImageGet_Thread = BAP_ImageGet_Thread()
@@ -378,7 +364,6 @@ BAP_BlurImageDisplay_Thread = BAP_ImageDisplay_Thread("Blur", 1)
 BAP_PlateImageDisplay_Thread = BAP_ImageDisplay_Thread("Plate", 2)
 BAP_PlateBinImageDisplay_Thread = BAP_ImageDisplay_Thread("PlateBin", 3)
 
-BAP_RecvThread.start()
 BAP_SendThread.start()
 
 BAP_ImageGet_Thread.start()
