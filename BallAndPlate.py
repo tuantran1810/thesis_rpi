@@ -20,15 +20,15 @@ usleep = lambda x: time.sleep(x/1000000.0)
 BAP_IMAGE_SIZE = 320 # Square image
 BAP_IMAGE_SIZE_STR = '320x320'
 
-BAP_THREADHOLD_VALUE = 190   # Value to put in threshold function, assign 255 to pixels that have lower value than this and 0 to the higher
-BAP_BALL_THREADHOLD_VALUE = 230   # Value to put in threshold function, assign 255 to pixels that have lower value than this and 0 to the higher
+BAP_THREADHOLD_VALUE = 150   # Value to put in threshold function, assign 255 to pixels that have lower value than this and 0 to the higher
+BAP_BALL_THREADHOLD_VALUE = 200   # Value to put in threshold function, assign 255 to pixels that have lower value than this and 0 to the higher
 BAP_RECORDING_TIME = 10    # Time for a recording sequence
 
-BAP_MIN_EXPECTED_BALL_SIZE = 0    # Place camera about 50cm higher than the plate
-BAP_MAX_EXPECTED_BALL_SIZE = 400
+BAP_MIN_EXPECTED_BALL_SIZE = 50   # Place camera about 50cm higher than the plate
+BAP_MAX_EXPECTED_BALL_SIZE = 300
 BAP_BALL_CENTER_OFFSET = 10
 
-BAP_MIN_EXPECTED_PLATE_SIZE = 50000
+BAP_MIN_EXPECTED_PLATE_SIZE = 45000
 BAP_MAX_EXPECTED_PLATE_SIZE = 65000
 
 BAP_CAMERA_WARMUP_TIME = 2
@@ -254,16 +254,16 @@ class BAP_BallPos_Thread(threading.Thread):
         kalman = cv2.KalmanFilter(4, 2, 0)
         kalman.measurementMatrix = np.array([[1,0,0,0],[0,1,0,0]],np.float32)
         kalman.transitionMatrix = np.array([[1,0,0.02,0],[0,1,0,0.02],[0,0,1,0],[0,0,0,1]],np.float32)
-        kalman.processNoiseCov = np.array([[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],np.float32) * 10
-        kalman.measurementNoiseCov = np.array([[1,0],[0,1]],np.float32) * 0.00003
+        # kalman.processNoiseCov = np.array([[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],np.float32) * 10
+        kalman.processNoiseCov = np.array([[0.1,0,0,0],[0,0.1,0,0],[0,0,5,0],[0,0,0,5]],np.float32)
+        # kalman.measurementNoiseCov = np.array([[1,0],[0,1]],np.float32) * 0.00003
+        kalman.measurementNoiseCov = np.array([[1,0],[0,1]],np.float32) * 1
 
         BallX = 0
         BallY = 0
 
         RealBallX = 0
         RealBallY = 0
-
-        test0 = 0
 
         while True:
             BAP_PlateImage_Mutex.acquire()
@@ -314,21 +314,16 @@ class BAP_BallPos_Thread(threading.Thread):
             kalman.correct(np.array([[np.float32(RealBallX)],[np.float32(RealBallY)]]))
             tmp = kalman.predict()
 
-            test1 = 70
-            UARTStr = '[BPos][' + '%03d '%tmp[0] + '%03d]'%tmp[1]
-            length = len(UARTStr) + 4
-            lenStr = '[' + '%02d'%length + ']'
-            SendStr = lenStr + UARTStr
+            if (tmp[0] != 0 and tmp[1] != 0): #do not send at init
+                UARTStr = '[BPos][' + '%03d '%tmp[0] + '%03d]'%tmp[1]
+                length = len(UARTStr) + 4
+                lenStr = '[' + '%02d'%length + ']'
+                SendStr = lenStr + UARTStr
 
-            test0 += 1
-            if(test0 == 1000):
-                test0 = 0
-
-            self.SendLock.acquire()
-            # self.SendMsgQueue.put(SendStr.ljust(40, ' '))
-            self.SendLock.release()
-            self.SendSem.release()
-            # usleep(20000)
+                self.SendLock.acquire()
+                self.SendMsgQueue.put(SendStr.ljust(40, ' '))
+                self.SendLock.release()
+                self.SendSem.release()
 
             # BAP_PlateImage_Mutex.acquire()
             # cv2.circle(BAP_PlateImage, (tmp[0], tmp[1]), 7, (255, 255, 255), -1)
@@ -392,4 +387,4 @@ BAP_BallPos_Thread.start()
 # BAP_OriginalImageDisplay_Thread.start()
 # BAP_BlurImageDisplay_Thread.start()
 # BAP_PlateImageDisplay_Thread.start()
-BAP_PlateBinImageDisplay_Thread.start()
+# BAP_PlateBinImageDisplay_Thread.start()
